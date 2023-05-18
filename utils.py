@@ -1,6 +1,8 @@
-import pystac
 from pathlib import Path
-from dateutil.parser import parse
+from datetime import datetime
+from shapely.geometry import box
+import pytz
+import pystac
 
 
 def create_in_memory_stac_hierarchy(root_dir, item_pattern='**/odc-metadata.stac-item.json', verbose=False):
@@ -61,47 +63,90 @@ def create_in_memory_stac_hierarchy(root_dir, item_pattern='**/odc-metadata.stac
     return catalog
 
 
-def filter_stac_collections(catalog, bbox, start_date, end_date):
+def timestring_to_utc_datetime(time, pattern=None):
+    """ Convert time string to UTC datetime object.
+    
+    Parameters
+    ----------
+    time: str
+        The time string to convert.
+    pattern: str
+        The format of the time string. Default is '%Y-%m-%d'.
+    
+    Returns
+    -------
+    datetime: datetime.datetime
+        The converted datetime object.
     """
-    Filter STAC Collections based on bounding box and time range.
+    if pattern is None:
+        pattern = '%Y-%m-%d'
+    return datetime.strptime(time, pattern).replace(tzinfo=pytz.UTC)
+
+
+def bbox_intersection(bbox1, bbox2):
+    """
+    Computes the intersection of two bounding boxes.
+
+    Parameters
+    ----------
+    bbox1: list
+        The first bounding box in the format [west, south, east, north].
+    bbox2: list
+        The second bounding box in the format [west, south, east, north].
+
+    Returns
+    -------
+    intersection: list or None
+        The intersection of the two bounding boxes in the format [west, south, east, north].
+        Returns None if there is no intersection.
+    """
+    box1 = box(*bbox1)
+    box2 = box(*bbox2)
+    intersection = box1.intersection(box2)
+    if intersection.is_empty:
+        return None
+    else:
+        return list(intersection.bounds)
+
+
+def filter_stac_catalog(catalog, bbox=None, time_range=None, time_pattern=None):
+    """
+    Filter STAC Catalog based on bounding box and time range.
     
     Parameters
     ----------
     catalog: pystac.Catalog
         The STAC Catalog to filter.
     bbox: list
-        The bounding box to filter the STAC Collections.
-    start_date: datetime.datetime
-        The start date to filter the STAC Collections.
-    end_date: datetime.datetime
-        The end date to filter the STAC Collections.
+        The bounding box in the format [west, south, east, north]. Default is None.
+    time_range: tuple(str, str)
+        The time range in the format (start_date, end_date). Default is None.
+    time_pattern: str
+        The format of the time string. Default is None.
     
     Returns
     -------
     filtered_collections: list
-        The filtered STAC Collection IDs.
+        The filtered STAC Collections.
+    filtered_items: list
+        The filtered STAC Items.
     """
-    collections = catalog.get_all_collections()
-    collections = list(collections)
-    filtered_collections = []
+    if bbox is None:
+        filtered_collections = [catalog.get_children()]
+    else:
+        filtered_collections = [collection for collection in catalog.get_children()
+                                if collection.extent.spatial.bboxes is not None and
+                                any(bbox_intersection(bbox, b) is not None
+                                    for b in collection.extent.spatial.bboxes)]
+    if time_range is None:
+        filtered_items = []
+        for collection in filtered_collections:
+            filtered_items.append(collection.get_items())
+    else:
+        start_date = timestring_to_utc_datetime(time=time_range[0], pattern=time_pattern)
+        end_date = timestring_to_utc_datetime(time=time_range[1], pattern=time_pattern)
+        filtered_items = [item for collection in filtered_collections
+                          for item in collection.get_items()
+                          if start_date <= item.datetime <= end_date]
     
-    for collection in collections:
-        spatial_extent = collection.extent.spatial.to_dict()
-        temporal_extent = collection.extent.temporal.to_dict()
-        
-        collection_bbox = spatial_extent["bbox"][0]
-        collection_time_range = temporal_extent["interval"][0]
-        
-        if (
-                collection_bbox != [float("inf"), float("inf"), float("-inf"), float("-inf")] and
-                bbox[0] <= collection_bbox[2] and
-                bbox[2] >= collection_bbox[0] and
-                bbox[1] <= collection_bbox[3] and
-                bbox[3] >= collection_bbox[1] and
-                start_date <= parse(collection_time_range[1]) and
-                end_date >= parse(collection_time_range[0])
-        ):
-            filtered_collections.append(collection)
-    
-    filtered_collections = [coll.id for coll in filtered_collections]
-    return filtered_collections
+    return filtered_collections, filtered_items
