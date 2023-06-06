@@ -1,3 +1,4 @@
+from json.decoder import JSONDecodeError
 from pathlib import Path
 from datetime import datetime
 from shapely.geometry import box
@@ -44,7 +45,12 @@ def create_in_memory_stac_hierarchy(root_dir, item_pattern='**/odc-metadata.stac
             items = []
             for item_p in stac_item_paths:
                 if tile in str(item_p.parent):
-                    item = pystac.Item.from_file(href=str(item_p))
+                    try:
+                        item = pystac.Item.from_file(href=str(item_p))
+                    except JSONDecodeError as e:
+                        if verbose:
+                            print(f"Could not read {item_p} in tile {tile} - Skip!")
+                        continue
                     items.append(item)
                     collection.add_item(item=item)
                     
