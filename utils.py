@@ -63,7 +63,7 @@ def create_in_memory_stac_hierarchy(root_dir, item_pattern='**/odc-metadata.stac
     return catalog
 
 
-def timestring_to_utc_datetime(time, pattern=None):
+def timestring_to_utc_datetime(time, pattern):
     """ Convert time string to UTC datetime object.
     
     Parameters
@@ -71,15 +71,13 @@ def timestring_to_utc_datetime(time, pattern=None):
     time: str
         The time string to convert.
     pattern: str
-        The format of the time string. Default is '%Y-%m-%d'.
+        The format of the time string.
     
     Returns
     -------
     datetime: datetime.datetime
         The converted datetime object.
     """
-    if pattern is None:
-        pattern = '%Y-%m-%d'
     return datetime.strptime(time, pattern).replace(tzinfo=pytz.UTC)
 
 
@@ -117,12 +115,14 @@ def filter_stac_catalog(catalog, bbox=None, time_range=None, time_pattern=None):
     ----------
     catalog: pystac.Catalog
         The STAC Catalog to filter.
-    bbox: list
-        The bounding box in the format [west, south, east, north]. Default is None.
-    time_range: tuple(str, str)
-        The time range in the format (start_date, end_date). Default is None.
-    time_pattern: str
-        The format of the time string. Default is None.
+    bbox: list, optional
+        The bounding box in the format [west, south, east, north]. Default is None, which means no spatial filtering is
+        applied.
+    time_range: tuple(str, str), optional
+        The time range in the format (start_date, end_date). Default is None, which means no temporal filtering is
+        applied.
+    time_pattern: str, optional
+        The format of the time strings used in time_range. Default is '%Y-%m-%d'. Only used if time_range is not None.
     
     Returns
     -------
@@ -143,6 +143,9 @@ def filter_stac_catalog(catalog, bbox=None, time_range=None, time_pattern=None):
         for collection in filtered_collections:
             filtered_items.append(collection.get_items())
     else:
+        if time_pattern is None:
+            time_pattern = '%Y-%m-%d'
+        
         start_date = timestring_to_utc_datetime(time=time_range[0], pattern=time_pattern)
         end_date = timestring_to_utc_datetime(time=time_range[1], pattern=time_pattern)
         filtered_items = [item for collection in filtered_collections
