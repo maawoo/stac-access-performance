@@ -1,12 +1,14 @@
 from json.decoder import JSONDecodeError
 from pathlib import Path
+import re
 from datetime import datetime
 from shapely.geometry import box
 import pytz
 import pystac
 
 
-def create_in_memory_stac_hierarchy(root_dir, item_pattern='**/odc-metadata.stac-item.json', verbose=False):
+def create_in_memory_stac_hierarchy(root_dir, item_pattern='**/odc-metadata.stac-item.json',
+                                    collection_pattern='[SN]\d{2}[EW]\d{3}', verbose=False):
     """
     Create STAC hierarchy for already existing STAC Items.
 
@@ -16,6 +18,8 @@ def create_in_memory_stac_hierarchy(root_dir, item_pattern='**/odc-metadata.stac
         Path to the root directory of the STAC hierarchy.
     item_pattern: str
         Pattern to find STAC Items. Default is '**/odc-metadata.stac-item.json'.
+    collection_pattern: str
+        Pattern to find STAC Collections. Default is [S|N]\d{2}[E|W]\d{3}, e.g. 'S02E017'.
     verbose: bool
         If True, print the number of STAC Items per Collection. Default is False.
 
@@ -31,40 +35,39 @@ def create_in_memory_stac_hierarchy(root_dir, item_pattern='**/odc-metadata.stac
     sp_extent = pystac.SpatialExtent([None, None, None, None])
     tmp_extent = pystac.TemporalExtent([None, None])
     
-    for sub in root_dir.iterdir():
-        if sub.is_dir() and len(sub.stem) == 7:
-            tile = sub.stem
-            stac_item_paths = list(sub.glob(item_pattern))
-            
-            collection = pystac.Collection(id=tile,
-                                           description=f'STAC Collection for {root_dir.stem} products of tile {tile}.',
-                                           extent=pystac.Extent(sp_extent, tmp_extent),
-                                           href=sub.joinpath('collection.json'))
-            catalog.add_child(collection)
-            
-            items = []
-            for item_p in stac_item_paths:
-                if tile in str(item_p.parent):
-                    try:
-                        item = pystac.Item.from_file(href=str(item_p))
-                    except JSONDecodeError as e:
-                        if verbose:
-                            print(f"Could not read {item_p} in tile {tile} - Skip!")
-                        continue
-                    items.append(item)
-                    collection.add_item(item=item)
-                    
-                    item.set_self_href(str(item_p))
-                    for asset_key, asset in item.assets.items():
-                        asset.href = Path(asset.href).name
-                else:
+    subdirs = [sub for sub in root_dir.iterdir() if re.match(collection_pattern, sub.name)]
+    for sub in subdirs:
+        tile = sub.stem
+        stac_item_paths = list(sub.glob(item_pattern))
+        
+        collection = pystac.Collection(id=tile,
+                                       description=f'STAC Collection for {root_dir.stem} products of tile {tile}.',
+                                       extent=pystac.Extent(sp_extent, tmp_extent),
+                                       href=sub.joinpath('collection.json'))
+        catalog.add_child(collection)
+        
+        items = []
+        for item_p in stac_item_paths:
+            if tile in str(item_p.parent):
+                try:
+                    item = pystac.Item.from_file(href=str(item_p))
+                except JSONDecodeError as e:
+                    if verbose:
+                        print(f"Could not read {item_p} in tile {tile} - Skip!")
                     continue
-            
-            extent = collection.extent.from_items(items=items)
-            collection.extent = extent
-            
-            if verbose:
-                print(f"{tile} - {len(stac_item_paths)}")
+                
+                items.append(item)
+                collection.add_item(item=item)
+                
+                item.set_self_href(str(item_p))
+                for asset_key, asset in item.assets.items():
+                    asset.href = Path(asset.href).name
+        
+        extent = collection.extent.from_items(items=items)
+        collection.extent = extent
+        
+        if verbose:
+            print(f"{tile} - {len(stac_item_paths)}")
     
     return catalog
 
